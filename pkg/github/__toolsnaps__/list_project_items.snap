@@ -3,11 +3,19 @@
     "title": "List project items",
     "readOnlyHint": true
   },
-  "description": "List Project items for a user or org",
+  "description": "GitHub Projects V2 - List Project Items with advanced filtering and field selection\n\nField usage:\n\n- Call list_project_fields first to get IDs/types.\n- Use EXACT returned field names (case-insensitive match). Don't invent names or IDs.\n- Iteration synonyms (sprint/cycle/iteration) only if that field exists; map to the actual name (e.g. sprint:@current).\n- Only include filters for fields that exist and are relevant.\n\nItem query syntax:\nAND = space | OR = comma (label:bug,critical) | NOT = prefix - ( -label:wontfix )\nQuote multi-word values: status:\"In Review\" team-name:\"Backend Team\"\nHyphenate multi-word field names (story-points).\nRanges: points:1..3  dates:2025-01-01..2025-12-31\nComparisons: updated:\u003e@today-7d priority:\u003e1 points:\u003c=10\nWildcards: title:*crash* label:bug*\nTemporal shortcuts: @today @today-7d @today-30d\nIteration shortcuts: @current @next @previous\n\nPagination (mandatory):\nLoop while pageInfo.hasNextPage=true using after=nextCursor. Keep query, fields, per_page IDENTICAL each page.\n\nFields parameter:\nInclude field IDs on EVERY paginated list_project_items call if you need values. Omit → title only.\n\nCounting rules:\n- Count items array length after full pagination.\n- If multi-page: collect all pages, dedupe by item.id (fallback node_id) before totals.\n- Never count field objects, content, or nested arrays as separate items.\n- item.id = project item ID (for updates/deletes). item.content.id = underlying issue/PR ID.\n\nSummary vs list:\n- Summaries ONLY if user uses verbs: analyze | summarize | summary | report | overview | insights.\n- Listing verbs (list/show/get/fetch/display/enumerate) → just enumerate + total.\n\nExamples:\nlist_projects: \"roadmap is:open\"\nlist_project_items: state:open is:issue sprint:@current priority:high updated:\u003e@today-7d\n\nSelf-check before returning:\n☑ Paginated fully ☑ Dedupe by id/node_id ☑ Correct IDs used ☑ Field names valid ☑ Summary only if requested.\n\nReturn COMPLETE data or state what's missing (e.g. pages skipped).",
   "inputSchema": {
     "properties": {
+      "after": {
+        "description": "Forward pagination cursor. Use when the previous response's pageInfo.hasNextPage=true. Supply pageInfo.nextCursor as 'after' and immediately request the next page. LOOP UNTIL pageInfo.hasNextPage=false (don't stop early). Keep query, fields, and per_page identical for every page.",
+        "type": "string"
+      },
+      "before": {
+        "description": "Backward pagination cursor (rare): supply to move to the preceding page using pageInfo.prevCursor. Not needed for normal forward iteration.",
+        "type": "string"
+      },
       "fields": {
-        "description": "Specific list of field IDs to include in the response (e.g. [\"102589\", \"985201\", \"169875\"]). If not provided, only the title field is included.",
+        "description": "Field IDs to include (e.g. [\"102589\", \"985201\"]). CRITICAL: Always provide to get field values. Without this, only titles returned. Get IDs from list_project_fields first.",
         "items": {
           "type": "string"
         },
@@ -26,7 +34,7 @@
         "type": "string"
       },
       "per_page": {
-        "description": "Number of results per page (max 100, default: 30)",
+        "description": "Results per page (max 50). Keep constant across paginated requests; changing mid-sequence can complicate page traversal.",
         "type": "number"
       },
       "project_number": {
@@ -34,7 +42,7 @@
         "type": "number"
       },
       "query": {
-        "description": "Search query to filter items",
+        "description": "Query string - For advanced filtering of project items using GitHub's search syntax:\n\nMUST reflect user intent; strongly prefer explicit content type if narrowed:\n\t- \"open issues\" → state:open is:issue\n\t- \"merged PRs\" → state:merged is:pr\n\t- \"items updated this week\" → updated:\u003e@today-7d (omit type only if mixed desired)\n\t- \"list all P1 priority items\" → priority:p1 (omit state if user wants all, omit type if user speciifies \"items\")\n\t- \"list all open P2 issues\" → is:issue state:open priority:p2 (include state if user wants open or closed, include type if user speciifies \"issues\" or \"PRs\")\n\t- \"all open issues I'm working on\" → is:issue state:open assignee:@me\nQuery Construction Heuristics:\n\ta. Extract type nouns: issues → is:issue | PRs, Pulls, or Pull Requests → is:pr | tasks/tickets → is:issue (ask if ambiguity)\n\tb. Map temporal phrases: \"this week\" → updated:\u003e@today-7d\n\tc. Map negations: \"excluding wontfix\" → -label:wontfix\n\td. Map priority adjectives: \"high/sev1/p1\" → priority:high OR priority:p1 (choose based on field presence)\n\nSyntax Essentials (items):\n   AND: space-separated. (label:bug priority:high).\n   OR: comma inside one qualifier (label:bug,critical).\n   NOT: leading '-' (-label:wontfix).\n   Hyphenate multi-word field names. (team-name:\"Backend Team\", story-points:\u003e5).\n   Quote multi-word values. (status:\"In Review\" team-name:\"Backend Team\").\n   Ranges: points:1..3, updated:\u003c@today-30d.\n   Wildcards: title:*crash*, label:bug*.\n\t Assigned to User: assignee:@me | assignee:username | no:assignee\n\nCommon Qualifier Glossary (items):\n   is:issue | is:pr | state:open|closed|merged | assignee:@me|username | label:NAME | status:VALUE |\n   priority:p1|high | sprint-name:@current | team-name:\"Backend Team\" | parent-issue:\"org/repo#123\" |\n   updated:\u003e@today-7d | title:*text* | -label:wontfix | label:bug,critical | no:assignee | has:label\n\nPagination Mandate:\n   Do not analyze until ALL pages fetched (loop while pageInfo.hasNextPage=true). Always reuse identical query, fields, per_page.\n\nRecovery Guidance:\n   If user provides ambiguous request (\"show project activity\") → ask clarification OR return mixed set (omit is:issue/is:pr). If user mixes project + item qualifiers in one phrase → split: run list_projects for discovery, then list_project_items for detail.\n\nNever:\n   - Infer field IDs; fetch via list_project_fields.\n   - Drop 'fields' param on subsequent pages if field values are needed.",
         "type": "string"
       }
     },

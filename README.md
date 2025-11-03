@@ -830,24 +830,75 @@ Options are:
   - `project_number`: The project's number. (number, required)
 
 - **list_project_fields** - List project fields
+  - `after`: Forward pagination cursor. Use when the previous response's pageInfo.hasNextPage=true. Supply pageInfo.nextCursor as 'after' and immediately request the next page. LOOP UNTIL pageInfo.hasNextPage=false (don't stop early). Keep per_page identical for every page. (string, optional)
+  - `before`: Backward pagination cursor (rare): supply to move to the preceding page using pageInfo.prevCursor. Not needed for normal forward iteration. (string, optional)
   - `owner`: If owner_type == user it is the handle for the GitHub user account. If owner_type == org it is the name of the organization. The name is not case sensitive. (string, required)
   - `owner_type`: Owner type (string, required)
-  - `per_page`: Number of results per page (max 100, default: 30) (number, optional)
+  - `per_page`: Results per page (max 50). Keep constant across paginated requests; changing mid-sequence can complicate page traversal. (number, optional)
   - `project_number`: The project's number. (number, required)
 
 - **list_project_items** - List project items
-  - `fields`: Specific list of field IDs to include in the response (e.g. ["102589", "985201", "169875"]). If not provided, only the title field is included. (string[], optional)
+  - `after`: Forward pagination cursor. Use when the previous response's pageInfo.hasNextPage=true. Supply pageInfo.nextCursor as 'after' and immediately request the next page. LOOP UNTIL pageInfo.hasNextPage=false (don't stop early). Keep query, fields, and per_page identical for every page. (string, optional)
+  - `before`: Backward pagination cursor (rare): supply to move to the preceding page using pageInfo.prevCursor. Not needed for normal forward iteration. (string, optional)
+  - `fields`: Field IDs to include (e.g. ["102589", "985201"]). CRITICAL: Always provide to get field values. Without this, only titles returned. Get IDs from list_project_fields first. (string[], optional)
   - `owner`: If owner_type == user it is the handle for the GitHub user account. If owner_type == org it is the name of the organization. The name is not case sensitive. (string, required)
   - `owner_type`: Owner type (string, required)
-  - `per_page`: Number of results per page (max 100, default: 30) (number, optional)
+  - `per_page`: Results per page (max 50). Keep constant across paginated requests; changing mid-sequence can complicate page traversal. (number, optional)
   - `project_number`: The project's number. (number, required)
-  - `query`: Search query to filter items (string, optional)
+  - `query`: Query string - For advanced filtering of project items using GitHub's search syntax:
+
+MUST reflect user intent; strongly prefer explicit content type if narrowed:
+	- "open issues" → state:open is:issue
+	- "merged PRs" → state:merged is:pr
+	- "items updated this week" → updated:>@today-7d (omit type only if mixed desired)
+	- "list all P1 priority items" → priority:p1 (omit state if user wants all, omit type if user speciifies "items")
+	- "list all open P2 issues" → is:issue state:open priority:p2 (include state if user wants open or closed, include type if user speciifies "issues" or "PRs")
+	- "all open issues I'm working on" → is:issue state:open assignee:@me
+Query Construction Heuristics:
+	a. Extract type nouns: issues → is:issue | PRs, Pulls, or Pull Requests → is:pr | tasks/tickets → is:issue (ask if ambiguity)
+	b. Map temporal phrases: "this week" → updated:>@today-7d
+	c. Map negations: "excluding wontfix" → -label:wontfix
+	d. Map priority adjectives: "high/sev1/p1" → priority:high OR priority:p1 (choose based on field presence)
+
+Syntax Essentials (items):
+   AND: space-separated. (label:bug priority:high).
+   OR: comma inside one qualifier (label:bug,critical).
+   NOT: leading '-' (-label:wontfix).
+   Hyphenate multi-word field names. (team-name:"Backend Team", story-points:>5).
+   Quote multi-word values. (status:"In Review" team-name:"Backend Team").
+   Ranges: points:1..3, updated:<@today-30d.
+   Wildcards: title:*crash*, label:bug*.
+	 Assigned to User: assignee:@me | assignee:username | no:assignee
+
+Common Qualifier Glossary (items):
+   is:issue | is:pr | state:open|closed|merged | assignee:@me|username | label:NAME | status:VALUE |
+   priority:p1|high | sprint-name:@current | team-name:"Backend Team" | parent-issue:"org/repo#123" |
+   updated:>@today-7d | title:*text* | -label:wontfix | label:bug,critical | no:assignee | has:label
+
+Pagination Mandate:
+   Do not analyze until ALL pages fetched (loop while pageInfo.hasNextPage=true). Always reuse identical query, fields, per_page.
+
+Recovery Guidance:
+   If user provides ambiguous request ("show project activity") → ask clarification OR return mixed set (omit is:issue/is:pr). If user mixes project + item qualifiers in one phrase → split: run list_projects for discovery, then list_project_items for detail.
+
+Never:
+   - Infer field IDs; fetch via list_project_fields.
+   - Drop 'fields' param on subsequent pages if field values are needed. (string, optional)
 
 - **list_projects** - List projects
+  - `after`: Forward pagination cursor. Use when the previous response's pageInfo.hasNextPage=true. Supply pageInfo.nextCursor as 'after' and immediately request the next page. LOOP UNTIL pageInfo.hasNextPage=false (don't stop early). Keep query and per_page identical for every page. (string, optional)
+  - `before`: Backward pagination cursor (rare): supply to move to the preceding page using pageInfo.prevCursor. Not needed for normal forward iteration. (string, optional)
   - `owner`: If owner_type == user it is the handle for the GitHub user account. If owner_type == org it is the name of the organization. The name is not case sensitive. (string, required)
   - `owner_type`: Owner type (string, required)
-  - `per_page`: Number of results per page (max 100, default: 30) (number, optional)
-  - `query`: Filter projects by a search query (matches title and description) (string, optional)
+  - `per_page`: Results per page (max 50). Keep constant across paginated requests; changing mid-sequence can complicate page traversal. (number, optional)
+  - `query`: Filter projects by a search query
+				
+Scope: title text + open/closed state.
+PERMITTED qualifiers: is:open, is:closed (state), simple title terms.
+FORBIDDEN: is:issue, is:pr, assignee:, label:, status:, sprint-name:, parent-issue:, team-name:, priority:, etc.
+Examples:
+	- roadmap is:open
+	- is:open feature planning (string, optional)
 
 - **update_project_item** - Update project item
   - `item_id`: The unique identifier of the project item. This is not the issue or pull request ID. (number, required)
