@@ -851,8 +851,8 @@ MUST reflect user intent; strongly prefer explicit content type if narrowed:
 	- "open issues" → state:open is:issue
 	- "merged PRs" → state:merged is:pr
 	- "items updated this week" → updated:>@today-7d (omit type only if mixed desired)
-	- "list all P1 priority items" → priority:p1 (omit state if user wants all, omit type if user speciifies "items")
-	- "list all open P2 issues" → is:issue state:open priority:p2 (include state if user wants open or closed, include type if user speciifies "issues" or "PRs")
+	- "list all P1 priority items" → priority:p1 (omit state if user wants all, omit type if user specifies "items")
+	- "list all open P2 issues" → is:issue state:open priority:p2 (include state if user wants open or closed, include type if user specifies "issues" or "PRs")
 	- "all open issues I'm working on" → is:issue state:open assignee:@me
 Query Construction Heuristics:
 	a. Extract type nouns: issues → is:issue | PRs, Pulls, or Pull Requests → is:pr | tasks/tickets → is:issue (ask if ambiguity)
