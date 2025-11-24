@@ -16,10 +16,11 @@ import (
 
 	"github.com/github/github-mcp-server/pkg/errors"
 	"github.com/github/github-mcp-server/pkg/github"
+	"github.com/github/github-mcp-server/pkg/lockdown"
 	mcplog "github.com/github/github-mcp-server/pkg/log"
 	"github.com/github/github-mcp-server/pkg/raw"
 	"github.com/github/github-mcp-server/pkg/translations"
-	gogithub "github.com/google/go-github/v76/github"
+	gogithub "github.com/google/go-github/v79/github"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/shurcooL/githubv4"
@@ -51,6 +52,12 @@ type MCPServerConfig struct {
 
 	// Content window size
 	ContentWindowSize int
+
+	// LockdownMode indicates if we should enable lockdown mode
+	LockdownMode bool
+
+	// RepoAccessTTL overrides the default TTL for repository access cache entries.
+	RepoAccessTTL *time.Duration
 }
 
 const stdioServerLogPrefix = "stdioserver"
@@ -77,6 +84,14 @@ func NewMCPServer(cfg MCPServerConfig) (*server.MCPServer, error) {
 		},
 	} // We're going to wrap the Transport later in beforeInit
 	gqlClient := githubv4.NewEnterpriseClient(apiHost.graphqlURL.String(), gqlHTTPClient)
+	repoAccessOpts := []lockdown.RepoAccessOption{}
+	if cfg.RepoAccessTTL != nil {
+		repoAccessOpts = append(repoAccessOpts, lockdown.WithTTL(*cfg.RepoAccessTTL))
+	}
+	var repoAccessCache *lockdown.RepoAccessCache
+	if cfg.LockdownMode {
+		repoAccessCache = lockdown.GetInstance(gqlClient, repoAccessOpts...)
+	}
 
 	// When a client send an initialize request, update the user agent to include the client info.
 	beforeInit := func(_ context.Context, _ any, message *mcp.InitializeRequest) {
@@ -154,7 +169,16 @@ func NewMCPServer(cfg MCPServerConfig) (*server.MCPServer, error) {
 	}
 
 	// Create default toolsets
-	tsg := github.DefaultToolsetGroup(cfg.ReadOnly, getClient, getGQLClient, getRawClient, cfg.Translator, cfg.ContentWindowSize)
+	tsg := github.DefaultToolsetGroup(
+		cfg.ReadOnly,
+		getClient,
+		getGQLClient,
+		getRawClient,
+		cfg.Translator,
+		cfg.ContentWindowSize,
+		github.FeatureFlags{LockdownMode: cfg.LockdownMode},
+		repoAccessCache,
+	)
 	err = tsg.EnableToolsets(enabledToolsets, nil)
 
 	if err != nil {
@@ -205,6 +229,12 @@ type StdioServerConfig struct {
 
 	// Content window size
 	ContentWindowSize int
+
+	// LockdownMode indicates if we should enable lockdown mode
+	LockdownMode bool
+
+	// RepoAccessCacheTTL overrides the default TTL for repository access cache entries.
+	RepoAccessCacheTTL *time.Duration
 }
 
 // RunStdioServer is not concurrent safe.
@@ -214,22 +244,6 @@ func RunStdioServer(cfg StdioServerConfig) error {
 	defer stop()
 
 	t, dumpTranslations := translations.TranslationHelper()
-
-	ghServer, err := NewMCPServer(MCPServerConfig{
-		Version:           cfg.Version,
-		Host:              cfg.Host,
-		Token:             cfg.Token,
-		EnabledToolsets:   cfg.EnabledToolsets,
-		DynamicToolsets:   cfg.DynamicToolsets,
-		ReadOnly:          cfg.ReadOnly,
-		Translator:        t,
-		ContentWindowSize: cfg.ContentWindowSize,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create MCP server: %w", err)
-	}
-
-	stdioServer := server.NewStdioServer(ghServer)
 
 	var slogHandler slog.Handler
 	var logOutput io.Writer
@@ -245,8 +259,26 @@ func RunStdioServer(cfg StdioServerConfig) error {
 		slogHandler = slog.NewTextHandler(logOutput, &slog.HandlerOptions{Level: slog.LevelInfo})
 	}
 	logger := slog.New(slogHandler)
-	logger.Info("starting server", "version", cfg.Version, "host", cfg.Host, "dynamicToolsets", cfg.DynamicToolsets, "readOnly", cfg.ReadOnly)
+	logger.Info("starting server", "version", cfg.Version, "host", cfg.Host, "dynamicToolsets", cfg.DynamicToolsets, "readOnly", cfg.ReadOnly, "lockdownEnabled", cfg.LockdownMode)
 	stdLogger := log.New(logOutput, stdioServerLogPrefix, 0)
+
+	ghServer, err := NewMCPServer(MCPServerConfig{
+		Version:           cfg.Version,
+		Host:              cfg.Host,
+		Token:             cfg.Token,
+		EnabledToolsets:   cfg.EnabledToolsets,
+		DynamicToolsets:   cfg.DynamicToolsets,
+		ReadOnly:          cfg.ReadOnly,
+		Translator:        t,
+		ContentWindowSize: cfg.ContentWindowSize,
+		LockdownMode:      cfg.LockdownMode,
+		RepoAccessTTL:     cfg.RepoAccessCacheTTL,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create MCP server: %w", err)
+	}
+
+	stdioServer := server.NewStdioServer(ghServer)
 	stdioServer.SetErrorLogger(stdLogger)
 
 	if cfg.ExportTranslations {
